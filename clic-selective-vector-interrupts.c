@@ -11,10 +11,10 @@
 #define RTC_FREQ	32768
 
 struct metal_cpu *cpu;
-struct metal_interrupt *cpu_intr, *tmr_intr;
-struct metal_led *led0_red, *led0_green, *led0_blue;
+struct metal_interrupt *cpu_intr;
 struct metal_interrupt *clic;
 int tmr_id, swch1_irq;
+struct metal_led *led0_red, *led0_green, *led0_blue;
 
 void display_instruction (void) {
     printf("\n");
@@ -26,17 +26,18 @@ void display_instruction (void) {
     printf("\n");
 }
 
-void timer_isr (int id, void *data) {
+void timer_isr (void) __attribute__((interrupt, aligned(64)));
+void timer_isr (void) {
 
     printf("**** Lets trigger a clic software interrupt (after 10 seconds) ****\n");
-    metal_interrupt_set_priority(clic, swch1_irq, 3);
     metal_interrupt_set(clic, swch1_irq);
 
-    metal_cpu_set_mtimecmp(cpu, metal_cpu_get_mtime(cpu) + 10*RTC_FREQ);
+    //metal_cpu_set_mtimecmp(cpu, metal_cpu_get_mtime(cpu) + 10*RTC_FREQ);
 }
 
-void switch1_isr(int id, void *data) {
-    printf("Got CSIP interrupt on via IRQ %d!\n", id);
+void switch1_isr(void) __attribute__((interrupt, aligned(64)));
+void switch1_isr(void) {
+    printf("Got CSIP interrupt on via IRQ %d!\n");
     metal_interrupt_clear(clic, swch1_irq);
     printf("Clear and re-arm timer another 10 seconds.\n");
     metal_led_toggle(led0_green);
@@ -76,52 +77,41 @@ int main (void)
     }
     metal_interrupt_init(cpu_intr);
 
-    // Setup Timer interrupt
-    tmr_intr = metal_cpu_timer_interrupt_controller(cpu);
-    if (tmr_intr == NULL) {
-        printf("Abort. TIMER interrupt controller is  null.\n");
-        return 4;
-    }
-    metal_interrupt_init(tmr_intr);
-    tmr_id = metal_cpu_timer_get_interrupt_id(cpu);
-    rc = metal_interrupt_register_handler(tmr_intr, tmr_id, timer_isr, cpu);
-    if (rc < 0) {
-        printf("Failed. TIMER interrupt handler registration failed\n");
-        return (rc * -1);
-    }
-
     clic = metal_interrupt_get_controller(METAL_CLIC_CONTROLLER,
                                           metal_cpu_get_current_hartid());
     if (clic == NULL) {
         printf("Exit. This example need a clic interrupt controller.\n");
         return 0;
     }
-/*
-MIE disable
-Walk through the IRQs and set the following;
-Then with irq-id, you can now change enable/disable, vector-enable/disable, level/priority, mode?
-MIE enable
-*/
     metal_interrupt_init(clic);
     metal_interrupt_set_vector_mode(clic, METAL_SELECTIVE_VECTOR_MODE);
     //metal_interrupt_privilege_mode(clic, METAL_INTR_PRIV_M_MODE);
-    //metal_interrupt_threshold_level(clic, 2);
+    //metal_interrupt_set_threshold(clic, 4);
+
+    tmr_id = metal_cpu_timer_get_interrupt_id(cpu);
+    //metal_interrupt_vector_enable(clic, tmr_id);
+    //metal_interrupt_set_priority(clic, tmr_id, 2);
+    rc = metal_interrupt_register_vector_handler(clic, tmr_id, timer_isr, cpu);
+    if (rc < 0) {
+        printf("Failed. TIMER interrupt handler registration failed\n");
+        return (rc * -1);
+    }
 
     swch1_irq = 12;
-    rc = metal_interrupt_register_handler(clic, swch1_irq, switch1_isr, NULL);
+    //metal_interrupt_vector_enable(clic, swch1_irq);
+    //metal_interrupt_set_priority(clic, swch1_irq, 2);
+    rc = metal_interrupt_register_vector_handler(clic, swch1_irq, switch1_isr, NULL);
     if (rc < 0) {
         printf("SW1 interrupt handler registration failed\n");
         return (rc * -1);
     }
-    metal_interrupt_set_threshold(clic, 1);
-    metal_interrupt_set_priority(clic, swch1_irq, 2);
     if (metal_interrupt_enable(clic, swch1_irq) == -1) {
         printf("SW1 interrupt enable failed\n");
         return 5;
     }
     // Set timeout of 10s, and enable timer interrupt
     metal_cpu_set_mtimecmp(cpu, metal_cpu_get_mtime(cpu) + 10*RTC_FREQ);
-    metal_interrupt_enable(tmr_intr, tmr_id);
+    metal_interrupt_enable(clic, tmr_id);
 
     display_instruction();
 
