@@ -8,6 +8,13 @@
 #include <metal/button.h>
 #include <metal/switch.h>
 
+/*
+ * Use the following #define to test selective vector per IRQ.
+ * Without it Timer and CSIP will operate in non-vector although
+ * the whole CLIC is configured in SELECTIVE_VECTOR mode
+#define SELECTIVE_VECTOR
+  */
+
 #define RTC_FREQ	32768
 
 struct metal_cpu *cpu;
@@ -26,8 +33,12 @@ void display_instruction (void) {
     printf("\n");
 }
 
+#ifdef SELECTIVE_VECTOR
 void timer_isr (void) __attribute__((interrupt, aligned(64)));
 void timer_isr (void) {
+#else
+void timer_isr (int id, void *data) {
+#endif
 
     printf("**** Lets trigger a clic software interrupt (after 10 seconds) ****\n");
     metal_interrupt_set(clic, swch1_irq);
@@ -35,8 +46,12 @@ void timer_isr (void) {
     //metal_cpu_set_mtimecmp(cpu, metal_cpu_get_mtime(cpu) + 10*RTC_FREQ);
 }
 
+#ifdef SELECTIVE_VECTOR
 void switch1_isr(void) __attribute__((interrupt, aligned(64)));
 void switch1_isr(void) {
+#else
+void switch1_isr(int id, void *data) {
+#endif
     printf("Got CSIP interrupt on via IRQ %d!\n");
     metal_interrupt_clear(clic, swch1_irq);
     printf("Clear and re-arm timer another 10 seconds.\n");
@@ -89,18 +104,26 @@ int main (void)
     //metal_interrupt_set_threshold(clic, 4);
 
     tmr_id = metal_cpu_timer_get_interrupt_id(cpu);
-    //metal_interrupt_vector_enable(clic, tmr_id);
-    //metal_interrupt_set_priority(clic, tmr_id, 2);
+#ifdef SELECTIVE_VECTOR
+    metal_interrupt_vector_enable(clic, tmr_id);
     rc = metal_interrupt_register_vector_handler(clic, tmr_id, timer_isr, cpu);
+#else
+    metal_interrupt_vector_disable(clic, tmr_id);
+    rc = metal_interrupt_register_handler(clic, tmr_id, timer_isr, cpu);
+#endif
     if (rc < 0) {
         printf("Failed. TIMER interrupt handler registration failed\n");
         return (rc * -1);
     }
 
     swch1_irq = 12;
-    //metal_interrupt_vector_enable(clic, swch1_irq);
-    //metal_interrupt_set_priority(clic, swch1_irq, 2);
+#ifdef SELECTIVE_VECTOR
+    metal_interrupt_vector_enable(clic, swch1_irq);
     rc = metal_interrupt_register_vector_handler(clic, swch1_irq, switch1_isr, NULL);
+#else
+    metal_interrupt_vector_disable(clic, swch1_irq);
+    rc = metal_interrupt_register_handler(clic, swch1_irq, switch1_isr, NULL);
+#endif
     if (rc < 0) {
         printf("SW1 interrupt handler registration failed\n");
         return (rc * -1);
