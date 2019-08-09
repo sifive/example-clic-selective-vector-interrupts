@@ -20,16 +20,16 @@
 struct metal_cpu *cpu;
 struct metal_interrupt *cpu_intr;
 struct metal_interrupt *clic;
-int tmr_id, swch1_irq;
-struct metal_led *led0_red, *led0_green, *led0_blue;
+int tmr_id, csip_irq;
+struct metal_led *led0_red, *led0_green;
 
 void display_instruction (void) {
     printf("\n");
     printf("SIFIVE, INC.\n!!\n");
     printf("\n");
-    printf("Coreplex IP Eval Kit 'clic-vector-interrupts' Example.\n\n");
+    printf("Coreplex IP Eval Kit 'clic-selective-vector-interrupts' example.\n\n");
     printf("IRQ 12 (CSIP) is enabled as extrenal interrupt sources.\n");
-    printf("A 10s debounce timer is used between these interupts.\n");
+    printf("A 10s debounce timer is used to trigger CSIP interupt.\n");
     printf("\n");
 }
 
@@ -39,21 +39,18 @@ void timer_isr (void) {
 #else
 void timer_isr (int id, void *data) {
 #endif
-
     printf("**** Lets trigger a clic software interrupt (after 10 seconds) ****\n");
-    metal_interrupt_set(clic, swch1_irq);
-
-    //metal_cpu_set_mtimecmp(cpu, metal_cpu_get_mtime(cpu) + 10*RTC_FREQ);
+    metal_interrupt_set(clic, csip_irq);
 }
 
 #ifdef SELECTIVE_VECTOR
-void switch1_isr(void) __attribute__((interrupt, aligned(64)));
-void switch1_isr(void) {
+void csip_isr(void) __attribute__((interrupt, aligned(64)));
+void csip_isr(void) {
 #else
-void switch1_isr(int id, void *data) {
+void csip_isr(int id, void *data) {
 #endif
     printf("Got CSIP interrupt on via IRQ %d!\n");
-    metal_interrupt_clear(clic, swch1_irq);
+    metal_interrupt_clear(clic, csip_irq);
     printf("Clear and re-arm timer another 10 seconds.\n");
     metal_led_toggle(led0_green);
     metal_led_toggle(led0_red);
@@ -67,17 +64,14 @@ int main (void)
     // Lets get start with getting LEDs and turn only RED ON
     led0_red = metal_led_get_rgb("LD0", "red");
     led0_green = metal_led_get_rgb("LD0", "green");
-    led0_blue = metal_led_get_rgb("LD0", "blue");
-    if ((led0_red == NULL) || (led0_green == NULL) || (led0_blue == NULL)) {
+    if ((led0_red == NULL) || (led0_green == NULL)) {
         printf("Abort. At least one of LEDs is null.\n");
         return 1;
     }
     metal_led_enable(led0_red);
     metal_led_enable(led0_green);
-    metal_led_enable(led0_blue);
     metal_led_on(led0_red);
     metal_led_off(led0_green);
-    metal_led_off(led0_blue);
  
     // Lets get the CPU and and its interrupt
     cpu = metal_cpu_get(metal_cpu_get_current_hartid());
@@ -92,6 +86,7 @@ int main (void)
     }
     metal_interrupt_init(cpu_intr);
 
+    // Lets get a CLIC interrupt controller explicitly
     clic = metal_interrupt_get_controller(METAL_CLIC_CONTROLLER,
                                           metal_cpu_get_current_hartid());
     if (clic == NULL) {
@@ -99,9 +94,10 @@ int main (void)
         return 0;
     }
     metal_interrupt_init(clic);
+
+    // Lets set CLIC in Selective Vector mode. Note this must be done AFTER init!!
+    // This mode REQUIRE enabling/disabling specific interrupt BEFORE interrupt registration!!
     metal_interrupt_set_vector_mode(clic, METAL_SELECTIVE_VECTOR_MODE);
-    //metal_interrupt_privilege_mode(clic, METAL_INTR_PRIV_M_MODE);
-    //metal_interrupt_set_threshold(clic, 4);
 
     tmr_id = metal_cpu_timer_get_interrupt_id(cpu);
 #ifdef SELECTIVE_VECTOR
@@ -116,19 +112,19 @@ int main (void)
         return (rc * -1);
     }
 
-    swch1_irq = 12;
+    csip_irq = 12;
 #ifdef SELECTIVE_VECTOR
-    metal_interrupt_vector_enable(clic, swch1_irq);
-    rc = metal_interrupt_register_vector_handler(clic, swch1_irq, switch1_isr, NULL);
+    metal_interrupt_vector_enable(clic, csip_irq);
+    rc = metal_interrupt_register_vector_handler(clic, csip_irq, csip_isr, NULL);
 #else
-    metal_interrupt_vector_disable(clic, swch1_irq);
-    rc = metal_interrupt_register_handler(clic, swch1_irq, switch1_isr, NULL);
+    metal_interrupt_vector_disable(clic, csip_irq);
+    rc = metal_interrupt_register_handler(clic, csip_irq, csip_isr, NULL);
 #endif
     if (rc < 0) {
         printf("SW1 interrupt handler registration failed\n");
         return (rc * -1);
     }
-    if (metal_interrupt_enable(clic, swch1_irq) == -1) {
+    if (metal_interrupt_enable(clic, csip_irq) == -1) {
         printf("SW1 interrupt enable failed\n");
         return 5;
     }
