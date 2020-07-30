@@ -37,11 +37,6 @@ void metal_riscv_cpu_intc_mtip_handler(void) {
     sifive_clic0_set(clic, SIFIVE_CLIC_SOFTWARE_INTERRUPT_ID);
 }
 
-/* Selectively vectored interrupt handlers must have the interrupt attribute. When
- * hardware vectoring is requested with -DMETAL_CLIC_VECTORED or -DMETAL_HLIC_VECTORED,
- * this happens automatically. We require this to be manually specified for selective
- * vectoring to reduce the overhead of nonvectored interrupt handlers. */
-__attribute__((interrupt))
 void metal_sifive_clic0_csip_handler(void) {
     struct metal_cpu cpu = metal_cpu_get(metal_cpu_get_current_hartid());
     printf("**** Caught CLIC Software Interrupt at time %u seconds ****\n", (uint32_t)metal_time());
@@ -63,7 +58,6 @@ int main (void)
     display_instruction();
 
     sifive_clic0_enable(clic, SIFIVE_CLIC_SOFTWARE_INTERRUPT_ID);
-    sifive_clic0_vector_enable(clic, SIFIVE_CLIC_SOFTWARE_INTERRUPT_ID);
 
     struct metal_cpu cpu = metal_cpu_get(metal_cpu_get_current_hartid());
     metal_cpu_set_mtimecmp(cpu, metal_cpu_get_mtime(cpu) + 10*RTC_FREQ);
